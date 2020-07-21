@@ -3,6 +3,9 @@
 use std::iter::FromIterator;
 use std::ops::{self, Bound, Range as StdRange, RangeBounds};
 
+mod iter;
+pub use self::iter::*;
+
 // use #[feature(trait_alias)] once stable
 //type RangeBounds = StdRangeBounds<usize>;
 type Range = StdRange<usize>;
@@ -27,6 +30,11 @@ fn bounds_to_range<R: RangeBounds<usize>>(range: R) -> Option<Range> {
 }
 
 /// An inversion list is a data structure that describes a set of non-overlapping numeric ranges, stored in increasing order.
+///
+/// A few notes regarding the naming convention of the functions:
+/// - *_strict: These functions usual check that ranges are strictly the same, and not sub/supersets.
+/// - *_at: These functions usually take indices into the backing buffer, while the other versions
+///         generally take a value that is contained in a range or ranges directly.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InversionList(Vec<Range>);
 
@@ -43,6 +51,7 @@ impl InversionList {
         self.0.capacity()
     }
 
+    /// Checks whether the given usize is inside any of the contained ranges.
     pub fn contains(&self, value: usize) -> bool {
         self.binary_search(value).is_ok()
     }
@@ -58,7 +67,7 @@ impl InversionList {
         }
     }
 
-    /// Checks whether this InversionList containts this exact range.
+    /// Checks whether this InversionList contains this exact range.
     pub fn contains_range_strict<R: RangeBounds<usize>>(&self, range: R) -> bool {
         if let Some(Range { start, end }) = bounds_to_range(range) {
             self.binary_search(start)
@@ -120,29 +129,7 @@ impl InversionList {
             !other.ranges().any(|range| self.intersects(range))
         }
     }
-    /*
-        pub fn difference<'this>(&'this self, other: &'this Self) -> Difference<'this> {
-            Difference {
-                ranges: self.ranges(),
-                other,
-            }
-        }
 
-        pub fn symmetric_difference<'this>(
-            &'this self,
-            other: &'this Self,
-        ) -> SymmetricDifference<'this> {
-            SymmetricDifference {}
-        }
-
-        pub fn intersection<'this>(&'this self, other: &'this Self) -> Intersection<'this> {
-            Intersection {}
-        }
-
-        pub fn union<'this>(&'this self, other: &'this Self) -> Union<'this> {
-            Union {}
-        }
-    */
     pub fn remove_range_at(&mut self, idx: usize) -> Option<Range> {
         if idx < self.len() {
             Some(self.0.remove(idx))
@@ -151,7 +138,8 @@ impl InversionList {
         }
     }
 
-    /// Adds a unit range(index..index + 1) to the inversion list. This is slightly faster than using [`add_range`].
+    /// Adds a unit range(index..index + 1) to the inversion list. This is faster than using
+    /// [`add_range`] saving a second binary_search.
     ///
     /// # Panics
     ///
@@ -277,7 +265,7 @@ impl InversionList {
     }
 
     #[allow(clippy::toplevel_ref_arg)]
-    fn binary_search(&self, ref key: usize) -> Result<usize, usize> {
+    pub fn binary_search(&self, ref key: usize) -> Result<usize, usize> {
         use std::cmp::Ordering::*;
         self.0.binary_search_by(move |range| {
             match (range.start.cmp(key), key.cmp(&range.end)) {
@@ -325,6 +313,33 @@ impl InversionList {
     /// An iterator over the inner ranges contained in this list.
     pub fn ranges<'this>(&'this self) -> impl Iterator<Item = Range> + 'this {
         self.0.iter().cloned()
+    }
+
+    pub fn difference<'this>(&'this self, other: &'this Self) -> Difference<'this> {
+        Difference {
+            _pd: std::marker::PhantomData,
+        }
+    }
+
+    pub fn symmetric_difference<'this>(
+        &'this self,
+        other: &'this Self,
+    ) -> SymmetricDifference<'this> {
+        SymmetricDifference {
+            _pd: std::marker::PhantomData,
+        }
+    }
+
+    pub fn intersection<'this>(&'this self, other: &'this Self) -> Intersection<'this> {
+        Intersection {
+            _pd: std::marker::PhantomData,
+        }
+    }
+
+    pub fn union<'this>(&'this self, other: &'this Self) -> Union<'this> {
+        Union {
+            _pd: std::marker::PhantomData,
+        }
     }
 }
 
