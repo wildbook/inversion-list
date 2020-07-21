@@ -1,7 +1,7 @@
 #![warn(clippy::all)]
 
 use std::iter::FromIterator;
-use std::ops::{Bound, Range as StdRange, RangeBounds};
+use std::ops::{self, Bound, Range as StdRange, RangeBounds};
 
 // use #[feature(trait_alias)] once stable
 //type RangeBounds = StdRangeBounds<usize>;
@@ -47,11 +47,22 @@ impl InversionList {
         self.binary_search(value).is_ok()
     }
 
+    /// Checks whether this InversionList contains a range that is a "superrange" of the given range.
     pub fn contains_range<R: RangeBounds<usize>>(&self, range: R) -> bool {
         if let Some(Range { start, end }) = bounds_to_range(range) {
             self.binary_search(start)
-                // FIXME what about split ranges? Should those be accounted for here?
                 .map(|idx_s| end <= self.0[idx_s].end)
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    }
+
+    /// Checks whether this InversionList containts this exact range.
+    pub fn contains_range_strict<R: RangeBounds<usize>>(&self, range: R) -> bool {
+        if let Some(Range { start, end }) = bounds_to_range(range) {
+            self.binary_search(start)
+                .map(|idx_s| end == self.0[idx_s].end)
                 .unwrap_or(false)
         } else {
             false
@@ -80,14 +91,28 @@ impl InversionList {
         self.0.is_empty()
     }
 
+    /// Checks whether `self` is a subset of `other`, meaning whether self's ranges all lie somewhere inside of `other`.
     pub fn is_subset(&self, other: &Self) -> bool {
         self.ranges().all(|range| other.contains_range(range))
     }
 
+    /// Checks whether `self` and `other` are entirely disjoint.
     pub fn is_superset(&self, other: &Self) -> bool {
         other.is_subset(self)
     }
 
+    /// Checks whether `self` is a subset of `other`, meaning whether self's ranges all lie somewhere inside of `other`.
+    pub fn is_subset_strict(&self, other: &Self) -> bool {
+        self.ranges()
+            .all(|range| other.contains_range_strict(range))
+    }
+
+    /// Checks whether `self` is a strict superset of `other`, meaning whether other containts all of self's ranges.
+    pub fn is_superset_strict(&self, other: &Self) -> bool {
+        other.is_subset_strict(self)
+    }
+
+    /// Checks whether `self` and `other` are entirely disjoint.
     pub fn is_disjoint(&self, other: &Self) -> bool {
         if self.len() <= other.len() {
             !self.ranges().any(|range| other.intersects(range))
@@ -212,6 +237,11 @@ impl InversionList {
     /// new left and right ranges of the split point. The left range will contain `at`.
     /// If `at` is equal to the start of the range it is in, no split occurs and the left
     /// and right indices will be equal to the index of the range containing the value.
+    ///
+    /// Split ranges that are right next to each other will not be recognized as one.
+    /// Meaning functions like `contains_range` will not work properly if the start and end
+    /// points lie in the different parts of the neighbouring ranges. Thus it is important to
+    /// either remove these ranges or remerge them.
     pub fn split(&mut self, at: usize) -> Option<(usize, usize)> {
         self.binary_search(at)
             .ok()
@@ -223,12 +253,26 @@ impl InversionList {
     /// # Panics
     ///
     /// Panics if the indices dont point to a valid index into the vec.
-    fn merge(&mut self, start: usize, end: usize) {
+    pub fn merge(&mut self, start: usize, end: usize) {
         self.0[start].end = self.0[end].end;
         self.0.drain(start + 1..=end);
     }
 
-    fn len(&self) -> usize {
+    /// Merges all ranges together that are directly adjacent to each other.
+    pub fn collapse(&mut self) {
+        let ranges = &mut self.0;
+        let mut i = 1;
+        while i < ranges.len() {
+            if ranges[i - 1].end == ranges[i].start {
+                ranges[i - 1].end = ranges[i].end;
+                ranges.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
@@ -287,6 +331,13 @@ impl InversionList {
 impl<R: RangeBounds<usize>> From<R> for InversionList {
     fn from(range: R) -> Self {
         InversionList(Vec::from_iter(bounds_to_range(range)))
+    }
+}
+
+impl ops::Deref for InversionList {
+    type Target = [Range];
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -483,6 +534,26 @@ mod test {
         assert!(il3.is_subset(&il));
         assert!(!il.is_subset(&il2));
         assert!(!il.is_subset(&il3));
+
+        assert!(il.is_superset(&il));
+        assert!(il.is_superset(&il2));
+        assert!(il.is_superset(&il3));
+        assert!(!il2.is_superset(&il));
+        assert!(!il3.is_superset(&il));
+    }
+
+    #[test]
+    fn is_subset_strict() {
+        let il = InversionList(vec![1..10, 15..26, 61..100]);
+        let il2 = InversionList(vec![1..10, 17..22, 77..88]);
+        let il3 = InversionList(vec![1..10, 77..88]);
+        assert!(il.is_subset_strict(&il));
+        assert!(!il2.is_subset_strict(&il));
+        assert!(il3.is_subset_strict(&il2));
+
+        assert!(il.is_superset_strict(&il));
+        assert!(!il.is_superset_strict(&il2));
+        assert!(il2.is_superset_strict(&il3));
     }
 
     #[test]
@@ -504,5 +575,12 @@ mod test {
         assert!(!il.intersects(0..1));
         assert!(il.intersects(12..17));
         assert!(il.intersects(20..30));
+    }
+
+    #[test]
+    fn collapse() {
+        let mut il = InversionList(vec![1..10, 10..26, 30..33, 33..35, 35..40, 41..45]);
+        il.collapse();
+        assert_eq!(il, InversionList(vec![1..26, 30..40, 41..45]));
     }
 }
