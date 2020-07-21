@@ -1,6 +1,7 @@
 #![warn(clippy::all)]
 
 use std::iter::FromIterator;
+use std::mem;
 use std::ops::{self, Bound, Range as StdRange, RangeBounds};
 
 mod iter;
@@ -257,6 +258,28 @@ impl InversionList {
             } else {
                 i += 1;
             }
+        }
+    }
+
+    /// Inverts all ranges, meaning existing ranges will be removed and parts that were previously
+    /// not covered by ranges will now be covered.
+    pub fn invert(&mut self) {
+        let prev_len = self.0.len();
+        let mut old = mem::replace(&mut self.0, Vec::with_capacity(prev_len)).into_iter();
+
+        let mut last = match old.next() {
+            Some(range) if range.start == 0 => range.end,
+            Some(range) => {
+                self.0.push(0..range.start);
+                range.end
+            }
+            None => return,
+        };
+        for range in old {
+            if range.start != last {
+                self.0.push(last..range.start);
+            }
+            last = range.end;
         }
     }
 
@@ -597,5 +620,15 @@ mod test {
         let mut il = InversionList(vec![1..10, 10..26, 30..33, 33..35, 35..40, 41..45]);
         il.collapse();
         assert_eq!(il, InversionList(vec![1..26, 30..40, 41..45]));
+    }
+
+    #[test]
+    fn invert() {
+        let mut il = InversionList(vec![1..10, 10..26, 30..33, 33..35, 35..40, 41..45]);
+        il.invert();
+        assert_eq!(il, InversionList(vec![0..1, 26..30, 40..41]));
+        let mut il = InversionList(vec![0..10, 15..26, 26..33, 34..35, 35..36]);
+        il.invert();
+        assert_eq!(il, InversionList(vec![10..15, 33..34]));
     }
 }
