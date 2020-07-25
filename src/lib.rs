@@ -103,7 +103,7 @@ impl InversionList {
 
     /// Checks whether `self` is a subset of `other`, meaning whether self's ranges all lie somewhere inside of `other`.
     pub fn is_subset(&self, other: &Self) -> bool {
-        self.ranges().all(|range| other.contains_range(range))
+        self.iter().all(|range| other.contains_range(range))
     }
 
     /// Checks whether `self` and `other` are entirely disjoint.
@@ -113,8 +113,7 @@ impl InversionList {
 
     /// Checks whether `self` is a subset of `other`, meaning whether self's ranges all lie somewhere inside of `other`.
     pub fn is_subset_strict(&self, other: &Self) -> bool {
-        self.ranges()
-            .all(|range| other.contains_range_strict(range))
+        self.iter().all(|range| other.contains_range_strict(range))
     }
 
     /// Checks whether `self` is a strict superset of `other`, meaning whether other containts all of self's ranges.
@@ -125,9 +124,9 @@ impl InversionList {
     /// Checks whether `self` and `other` are entirely disjoint.
     pub fn is_disjoint(&self, other: &Self) -> bool {
         if self.len() <= other.len() {
-            !self.ranges().any(|range| other.intersects(range))
+            !self.iter().any(|range| other.intersects(range))
         } else {
-            !other.ranges().any(|range| self.intersects(range))
+            !other.iter().any(|range| self.intersects(range))
         }
     }
 
@@ -331,38 +330,6 @@ impl InversionList {
     pub fn span(&self) -> Option<Range> {
         self.start()
             .and_then(|start| self.end().map(move |end| start..end))
-    }
-
-    /// An iterator over the inner ranges contained in this list.
-    pub fn ranges<'this>(&'this self) -> impl Iterator<Item = Range> + 'this {
-        self.0.iter().cloned()
-    }
-
-    pub fn difference<'this>(&'this self, other: &'this Self) -> Difference<'this> {
-        Difference {
-            _pd: std::marker::PhantomData,
-        }
-    }
-
-    pub fn symmetric_difference<'this>(
-        &'this self,
-        other: &'this Self,
-    ) -> SymmetricDifference<'this> {
-        SymmetricDifference {
-            _pd: std::marker::PhantomData,
-        }
-    }
-
-    pub fn intersection<'this>(&'this self, other: &'this Self) -> Intersection<'this> {
-        Intersection {
-            _pd: std::marker::PhantomData,
-        }
-    }
-
-    pub fn union<'this>(&'this self, other: &'this Self) -> Union<'this> {
-        Union {
-            _pd: std::marker::PhantomData,
-        }
     }
 }
 
