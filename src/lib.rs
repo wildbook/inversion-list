@@ -470,6 +470,35 @@ impl ops::BitOrAssign<&InversionList> for InversionList {
     }
 }
 
+impl ops::Not for InversionList {
+    type Output = InversionList;
+    fn not(self) -> InversionList {
+        !&self
+    }
+}
+
+impl ops::Not for &InversionList {
+    type Output = InversionList;
+    fn not(self) -> InversionList {
+        let mut res = InversionList::new();
+        let mut iter = self.iter();
+        if let Some(range) = iter.next() {
+            let mut last = if range.start == 0 {
+                range.end
+            } else {
+                res.add_range(0..range.start);
+                range.end
+            };
+            for range in iter {
+                res.add_range(last..range.start);
+                last = range.end
+            }
+            res.add_range(last..!0);
+        }
+        res
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -760,5 +789,13 @@ mod test {
             il | il2,
             InversionList(vec![0..5, 5..18, 19..27, 30..40, 45..82])
         );
+    }
+
+    #[test]
+    fn test_not() {
+        let il = InversionList(vec![0..5, 5..15, 20..25, 50..80]);
+        assert_eq!(!il, InversionList(vec![15..20, 25..50, 80..!0]));
+        let il = InversionList(vec![5..15, 20..25, 50..80]);
+        assert_eq!(!il, InversionList(vec![0..5, 15..20, 25..50, 80..!0]));
     }
 }
