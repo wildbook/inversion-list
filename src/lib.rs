@@ -372,7 +372,7 @@ impl ops::BitAnd<&InversionList> for &InversionList {
                 .unwrap_or_else(|idx| idx - 1 /*can this ever underflow?*/);
             debug_assert!(start <= end);
             res.add_range(range.start.max(base[start].start)..range.end.min(base[start].end));
-            for range in &base[(start + 1)..end] {
+            for range in base.get((start + 1)..end).into_iter().flatten() {
                 // could just copy slices here for efficiency
                 res.add_range(range.clone());
             }
