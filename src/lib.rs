@@ -349,8 +349,11 @@ impl ops::Deref for InversionList {
 
 impl FromIterator<Range> for InversionList {
     fn from_iter<T: IntoIterator<Item = Range>>(iter: T) -> Self {
-        // FIXME: check invariants
-        InversionList(iter.into_iter().collect())
+        let mut res = InversionList::new();
+        for range in iter {
+            res.add_range(range);
+        }
+        res
     }
 }
 
@@ -413,6 +416,57 @@ impl ops::BitAndAssign<InversionList> for InversionList {
 impl ops::BitAndAssign<&InversionList> for InversionList {
     fn bitand_assign(&mut self, rhs: &InversionList) {
         *self = &*self & rhs;
+    }
+}
+
+impl ops::BitOr<&InversionList> for &InversionList {
+    type Output = InversionList;
+    fn bitor(self, rhs: &InversionList) -> Self::Output {
+        // TODO: optimize these clones away in owned impls
+        let (mut res, iter) = if self.len() < rhs.len() {
+            (rhs.clone(), self.iter())
+        } else {
+            (self.clone(), rhs.iter())
+        };
+
+        for range in iter {
+            res.add_range(range);
+        }
+
+        res
+    }
+}
+
+impl ops::BitOr<InversionList> for &InversionList {
+    type Output = InversionList;
+    fn bitor(self, rhs: InversionList) -> Self::Output {
+        <&InversionList>::bitor(self, &rhs)
+    }
+}
+
+impl ops::BitOr<&InversionList> for InversionList {
+    type Output = InversionList;
+    fn bitor(self, rhs: &InversionList) -> Self::Output {
+        <&InversionList>::bitor(&self, rhs)
+    }
+}
+
+impl ops::BitOr<InversionList> for InversionList {
+    type Output = InversionList;
+    fn bitor(self, rhs: InversionList) -> Self::Output {
+        <&InversionList>::bitor(&self, &rhs)
+    }
+}
+
+impl ops::BitOrAssign<InversionList> for InversionList {
+    fn bitor_assign(&mut self, rhs: InversionList) {
+        *self |= &rhs;
+    }
+}
+
+impl ops::BitOrAssign<&InversionList> for InversionList {
+    fn bitor_assign(&mut self, rhs: &InversionList) {
+        *self = &*self | rhs;
     }
 }
 
@@ -686,6 +740,25 @@ mod test {
         assert_eq!(
             il & il2,
             InversionList(vec![0..5, 7..10, 12..15, 20..25, 50..55, 57..60, 78..80])
+        );
+    }
+
+    #[test]
+    fn test_bitor() {
+        let il = InversionList(vec![0..5, 5..15, 20..25, 50..80]);
+        let il2 = InversionList(vec![
+            0..5,
+            7..10,
+            12..18,
+            19..27,
+            30..40,
+            45..55,
+            57..60,
+            78..82,
+        ]);
+        assert_eq!(
+            il | il2,
+            InversionList(vec![0..5, 5..18, 19..27, 30..40, 45..82])
         );
     }
 }
