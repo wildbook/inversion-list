@@ -1,5 +1,6 @@
 #![warn(clippy::all)]
 
+use std::convert::identity;
 use std::iter::FromIterator;
 use std::mem;
 use std::ops::{self, Bound, Range as StdRange, RangeBounds};
@@ -346,9 +347,79 @@ impl ops::Deref for InversionList {
     }
 }
 
+impl FromIterator<Range> for InversionList {
+    fn from_iter<T: IntoIterator<Item = Range>>(iter: T) -> Self {
+        // FIXME: check invariants
+        InversionList(iter.into_iter().collect())
+    }
+}
+
+impl ops::BitAnd<&InversionList> for &InversionList {
+    type Output = InversionList;
+    fn bitand(self, rhs: &InversionList) -> Self::Output {
+        let mut res = InversionList::new();
+
+        let (base, iter) = if self.len() < rhs.len() {
+            (rhs, self.iter())
+        } else {
+            (self, rhs.iter())
+        };
+
+        for range in iter {
+            let start = base.binary_search(range.start).unwrap_or_else(identity);
+            let end = base
+                .binary_search(range.end)
+                .unwrap_or_else(|idx| idx - 1 /*can this ever underflow?*/);
+            debug_assert!(start <= end);
+            res.add_range(range.start.max(base[start].start)..range.end.min(base[start].end));
+            for range in &base[(start + 1)..end] {
+                // could just copy slices here for efficiency
+                res.add_range(range.clone());
+            }
+            res.add_range(range.start.max(base[end].start)..range.end.min(base[end].end));
+        }
+
+        res
+    }
+}
+
+impl ops::BitAnd<InversionList> for &InversionList {
+    type Output = InversionList;
+    fn bitand(self, rhs: InversionList) -> Self::Output {
+        <&InversionList>::bitand(self, &rhs)
+    }
+}
+
+impl ops::BitAnd<&InversionList> for InversionList {
+    type Output = InversionList;
+    fn bitand(self, rhs: &InversionList) -> Self::Output {
+        <&InversionList>::bitand(&self, rhs)
+    }
+}
+
+impl ops::BitAnd<InversionList> for InversionList {
+    type Output = InversionList;
+    fn bitand(self, rhs: InversionList) -> Self::Output {
+        <&InversionList>::bitand(&self, &rhs)
+    }
+}
+
+impl ops::BitAndAssign<InversionList> for InversionList {
+    fn bitand_assign(&mut self, rhs: InversionList) {
+        *self &= &rhs;
+    }
+}
+
+impl ops::BitAndAssign<&InversionList> for InversionList {
+    fn bitand_assign(&mut self, rhs: &InversionList) {
+        *self = &*self & rhs;
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
     #[test]
     fn binary_search() {
         let il = InversionList(vec![0..5, 5..15, 20..25]);
@@ -597,5 +668,24 @@ mod test {
         let mut il = InversionList(vec![0..10, 15..26, 26..33, 34..35, 35..36]);
         il.invert();
         assert_eq!(il, InversionList(vec![10..15, 33..34]));
+    }
+
+    #[test]
+    fn test_bitand() {
+        let il = InversionList(vec![0..5, 5..15, 20..25, 50..80]);
+        let il2 = InversionList(vec![
+            0..5,
+            7..10,
+            12..18,
+            19..27,
+            30..40,
+            45..55,
+            57..60,
+            78..82,
+        ]);
+        assert_eq!(
+            il & il2,
+            InversionList(vec![0..5, 7..10, 12..15, 20..25, 50..55, 57..60, 78..80])
+        );
     }
 }
