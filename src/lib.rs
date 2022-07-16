@@ -3,27 +3,30 @@
 use std::convert::identity;
 use std::iter::FromIterator;
 use std::mem;
-use std::ops::{self, Bound, Range as StdRange, RangeBounds};
+use std::ops::{self, Bound, Range, RangeBounds};
 
 mod iter;
+use num_traits::PrimInt;
+
 pub use self::iter::*;
 
-// use #[feature(trait_alias)] once stable
-//type RangeBounds = StdRangeBounds<usize>;
-type Range = StdRange<usize>;
-
 /// Turn a RangeBounds into a Range, unless the resulting range is empty.
-fn bounds_to_range<R: RangeBounds<usize>>(range: R) -> Option<Range> {
+fn bounds_to_range<T: PrimInt, R: RangeBounds<T>>(range: R) -> Option<Range<T>> {
     let start = match range.start_bound() {
         Bound::Included(&n) => n,
-        Bound::Excluded(&n) => n.checked_add(1).expect("range start bound overflowed"),
-        Bound::Unbounded => 0,
+        Bound::Excluded(&n) => n
+            .checked_add(&T::one())
+            .expect("range start bound overflowed"),
+        Bound::Unbounded => T::min_value(),
     };
     let end = match range.end_bound() {
-        Bound::Included(&n) => n.checked_add(1).expect("range end bound overflowed"),
+        Bound::Included(&n) => n
+            .checked_add(&T::one())
+            .expect("range end bound overflowed"),
         Bound::Excluded(&n) => n,
-        Bound::Unbounded => !0usize,
+        Bound::Unbounded => T::max_value(),
     };
+
     if end <= start {
         None
     } else {
@@ -38,9 +41,9 @@ fn bounds_to_range<R: RangeBounds<usize>>(range: R) -> Option<Range> {
 /// - *_at: These functions usually take indices into the backing buffer, while the other versions
 ///         generally take a value that is contained in a range or ranges directly.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct InversionList(Vec<Range>);
+pub struct InversionList<Ty: PrimInt = usize>(Vec<Range<Ty>>);
 
-impl InversionList {
+impl<Ty: PrimInt> InversionList<Ty> {
     pub fn new() -> Self {
         InversionList(vec![])
     }
@@ -54,12 +57,12 @@ impl InversionList {
     }
 
     /// Checks whether the given usize is inside any of the contained ranges.
-    pub fn contains(&self, value: usize) -> bool {
+    pub fn contains(&self, value: Ty) -> bool {
         self.binary_search(value).is_ok()
     }
 
     /// Checks whether this InversionList contains a range that is a "superrange" of the given range.
-    pub fn contains_range<R: RangeBounds<usize>>(&self, range: R) -> bool {
+    pub fn contains_range<R: RangeBounds<Ty>>(&self, range: R) -> bool {
         if let Some(Range { start, end }) = bounds_to_range(range) {
             self.binary_search(start)
                 .map(|idx_s| end <= self.0[idx_s].end)
@@ -70,7 +73,7 @@ impl InversionList {
     }
 
     /// Checks whether this InversionList contains this exact range.
-    pub fn contains_range_strict<R: RangeBounds<usize>>(&self, range: R) -> bool {
+    pub fn contains_range_strict<R: RangeBounds<Ty>>(&self, range: R) -> bool {
         if let Some(Range { start, end }) = bounds_to_range(range) {
             self.binary_search(start)
                 .map(|idx_s| end == self.0[idx_s].end)
@@ -81,12 +84,12 @@ impl InversionList {
     }
 
     /// Check if the given range intersects with any ranges inside of the inversion list.
-    pub fn intersects<R: RangeBounds<usize>>(&self, range: R) -> bool {
+    pub fn intersects<R: RangeBounds<Ty>>(&self, range: R) -> bool {
         if let Some(Range { start, end }) = bounds_to_range(range) {
             match self.binary_search(start) {
                 Ok(_) => true,
                 Err(idx_s) => {
-                    match self.binary_search(end - 1) {
+                    match self.binary_search(end - Ty::one()) {
                         Ok(_) => true,
                         // check if there is at least one range inside of our range
                         Err(idx_e) => idx_e - idx_s > 1,
@@ -131,7 +134,7 @@ impl InversionList {
         }
     }
 
-    pub fn remove_range_at(&mut self, idx: usize) -> Option<Range> {
+    pub fn remove_range_at(&mut self, idx: usize) -> Option<Range<Ty>> {
         if idx < self.len() {
             Some(self.0.remove(idx))
         } else {
@@ -145,18 +148,21 @@ impl InversionList {
     /// # Panics
     ///
     /// Panics if index is equal to usize::MAX.
-    pub fn add_unit(&mut self, index: usize) {
+    pub fn add_unit(&mut self, index: Ty) {
         if let Err(insert_idx) = self.binary_search(index) {
             // this creates a new unit range that may be directly adjacent to an existing one
             // have a method that tries to merge them directly as well?
             self.0.insert(
                 insert_idx,
-                index..index.checked_add(1).expect("index is equal to usize::MAX"),
+                index
+                    ..index
+                        .checked_add(&Ty::one())
+                        .expect("index is equal to usize::MAX"),
             )
         }
     }
 
-    pub fn add_range<R: RangeBounds<usize>>(&mut self, range: R) {
+    pub fn add_range<R: RangeBounds<Ty>>(&mut self, range: R) {
         let (start, end) = match bounds_to_range(range) {
             Some(range) => (range.start, range.end),
             None => return,
@@ -170,20 +176,20 @@ impl InversionList {
                 Ok(idx_e) => (idx_s, idx_e),
                 // and ends in an empty space possibly surrounding other ranges
                 Err(idx_e) => {
-                    self.0.insert(idx_e, end - 1..end);
+                    self.0.insert(idx_e, end - Ty::one()..end);
                     (idx_s, idx_e)
                 }
             },
             // range starts in an empty space
             Err(idx_s) => {
                 // therefor create a dummy range to merge on
-                self.0.insert(idx_s, start..start + 1);
+                self.0.insert(idx_s, start..start + Ty::one());
                 match self.binary_search(end) {
                     // and ends in another possibly surrounding other ranges
                     Ok(idx_e) => (idx_s, idx_e),
                     // and ends in an empty space possibly surrounding other ranges
                     Err(idx_e) => {
-                        self.0.insert(idx_e, end - 1..end);
+                        self.0.insert(idx_e, end - Ty::one()..end);
                         (idx_s, idx_e)
                     }
                 }
@@ -192,7 +198,7 @@ impl InversionList {
         self.merge(idx_s, idx_e);
     }
 
-    pub fn remove_range<R: RangeBounds<usize>>(&mut self, range: R) {
+    pub fn remove_range<R: RangeBounds<Ty>>(&mut self, range: R) {
         let (start, end) = match bounds_to_range(range) {
             Some(range) => (range.start, range.end),
             None => return,
@@ -231,7 +237,7 @@ impl InversionList {
     /// Meaning functions like `contains_range` will not work properly if the start and end
     /// points lie in the different parts of the neighbouring ranges. Thus it is important to
     /// either remove these ranges or remerge them.
-    pub fn split(&mut self, at: usize) -> Option<(usize, usize)> {
+    pub fn split(&mut self, at: Ty) -> Option<(usize, usize)> {
         self.binary_search(at)
             .ok()
             .map(|idx| self.split_impl(idx, at))
@@ -268,9 +274,9 @@ impl InversionList {
         let mut old = mem::replace(&mut self.0, Vec::with_capacity(prev_len)).into_iter();
 
         let mut last = match old.next() {
-            Some(range) if range.start == 0 => range.end,
+            Some(range) if range.start == Ty::min_value() => range.end,
             Some(range) => {
-                self.0.push(0..range.start);
+                self.0.push(Ty::min_value()..range.start);
                 range.end
             }
             None => return,
@@ -288,7 +294,7 @@ impl InversionList {
     }
 
     #[allow(clippy::toplevel_ref_arg)]
-    pub fn binary_search(&self, ref key: usize) -> Result<usize, usize> {
+    pub fn binary_search(&self, ref key: Ty) -> Result<usize, usize> {
         use std::cmp::Ordering::*;
         self.0.binary_search_by(move |range| {
             match (range.start.cmp(key), key.cmp(&range.end)) {
@@ -307,7 +313,7 @@ impl InversionList {
     // invariant, `at` is inside the range addressed by idx
     // return value is left range and right range indices of the split range.
     // The indices are the same if the split point was at the start of the range.
-    fn split_impl(&mut self, idx: usize, at: usize) -> (usize, usize) {
+    fn split_impl(&mut self, idx: usize, at: Ty) -> (usize, usize) {
         debug_assert!(self.0[idx].contains(&at));
         let to_split = &mut self.0[idx];
         if to_split.start != at {
@@ -319,36 +325,37 @@ impl InversionList {
         }
     }
 
-    pub fn end(&self) -> Option<usize> {
+    pub fn end(&self) -> Option<Ty> {
         self.0.last().map(|r| r.end)
     }
 
-    pub fn start(&self) -> Option<usize> {
+    pub fn start(&self) -> Option<Ty> {
         self.0.first().map(|r| r.start)
     }
 
     /// Returns the complete surrounding range, if any.
-    pub fn span(&self) -> Option<Range> {
+    pub fn span(&self) -> Option<Range<Ty>> {
         self.start()
             .and_then(|start| self.end().map(move |end| start..end))
     }
 }
 
-impl<R: RangeBounds<usize>> From<R> for InversionList {
+// TODO: Can't be changed to `Ty`. Kept for backwards compatibility.
+impl<R: RangeBounds<usize>> From<R> for InversionList<usize> {
     fn from(range: R) -> Self {
         InversionList(Vec::from_iter(bounds_to_range(range)))
     }
 }
 
-impl ops::Deref for InversionList {
-    type Target = [Range];
+impl<Ty: PrimInt> ops::Deref for InversionList<Ty> {
+    type Target = [Range<Ty>];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl FromIterator<Range> for InversionList {
-    fn from_iter<T: IntoIterator<Item = Range>>(iter: T) -> Self {
+impl<Ty: PrimInt> FromIterator<Range<Ty>> for InversionList<Ty> {
+    fn from_iter<T: IntoIterator<Item = Range<Ty>>>(iter: T) -> Self {
         let mut res = InversionList::new();
         for range in iter {
             res.add_range(range);
@@ -357,9 +364,9 @@ impl FromIterator<Range> for InversionList {
     }
 }
 
-impl ops::BitAnd<&InversionList> for &InversionList {
-    type Output = InversionList;
-    fn bitand(self, rhs: &InversionList) -> Self::Output {
+impl<Ty: PrimInt> ops::BitAnd<&InversionList<Ty>> for &InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitand(self, rhs: &InversionList<Ty>) -> Self::Output {
         let mut res = InversionList::new();
 
         let (base, iter) = if self.len() < rhs.len() {
@@ -386,42 +393,42 @@ impl ops::BitAnd<&InversionList> for &InversionList {
     }
 }
 
-impl ops::BitAnd<InversionList> for &InversionList {
-    type Output = InversionList;
-    fn bitand(self, rhs: InversionList) -> Self::Output {
-        <&InversionList>::bitand(self, &rhs)
+impl<Ty: PrimInt> ops::BitAnd<InversionList<Ty>> for &InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitand(self, rhs: InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitand(self, &rhs)
     }
 }
 
-impl ops::BitAnd<&InversionList> for InversionList {
-    type Output = InversionList;
-    fn bitand(self, rhs: &InversionList) -> Self::Output {
-        <&InversionList>::bitand(&self, rhs)
+impl<Ty: PrimInt> ops::BitAnd<&InversionList<Ty>> for InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitand(self, rhs: &InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitand(&self, rhs)
     }
 }
 
-impl ops::BitAnd<InversionList> for InversionList {
-    type Output = InversionList;
-    fn bitand(self, rhs: InversionList) -> Self::Output {
-        <&InversionList>::bitand(&self, &rhs)
+impl<Ty: PrimInt> ops::BitAnd<InversionList<Ty>> for InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitand(self, rhs: InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitand(&self, &rhs)
     }
 }
 
-impl ops::BitAndAssign<InversionList> for InversionList {
-    fn bitand_assign(&mut self, rhs: InversionList) {
+impl<Ty: PrimInt> ops::BitAndAssign<InversionList<Ty>> for InversionList<Ty> {
+    fn bitand_assign(&mut self, rhs: InversionList<Ty>) {
         *self &= &rhs;
     }
 }
 
-impl ops::BitAndAssign<&InversionList> for InversionList {
-    fn bitand_assign(&mut self, rhs: &InversionList) {
+impl<Ty: PrimInt> ops::BitAndAssign<&InversionList<Ty>> for InversionList<Ty> {
+    fn bitand_assign(&mut self, rhs: &InversionList<Ty>) {
         *self = &*self & rhs;
     }
 }
 
-impl ops::BitOr<&InversionList> for &InversionList {
-    type Output = InversionList;
-    fn bitor(self, rhs: &InversionList) -> Self::Output {
+impl<Ty: PrimInt> ops::BitOr<&InversionList<Ty>> for &InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitor(self, rhs: &InversionList<Ty>) -> Self::Output {
         // TODO: optimize these clones away in owned impls
         let (mut res, iter) = if self.len() < rhs.len() {
             (rhs.clone(), self.iter())
@@ -437,63 +444,63 @@ impl ops::BitOr<&InversionList> for &InversionList {
     }
 }
 
-impl ops::BitOr<InversionList> for &InversionList {
-    type Output = InversionList;
-    fn bitor(self, rhs: InversionList) -> Self::Output {
-        <&InversionList>::bitor(self, &rhs)
+impl<Ty: PrimInt> ops::BitOr<InversionList<Ty>> for &InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitor(self, rhs: InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitor(self, &rhs)
     }
 }
 
-impl ops::BitOr<&InversionList> for InversionList {
-    type Output = InversionList;
-    fn bitor(self, rhs: &InversionList) -> Self::Output {
-        <&InversionList>::bitor(&self, rhs)
+impl<Ty: PrimInt> ops::BitOr<&InversionList<Ty>> for InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitor(self, rhs: &InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitor(&self, rhs)
     }
 }
 
-impl ops::BitOr<InversionList> for InversionList {
-    type Output = InversionList;
-    fn bitor(self, rhs: InversionList) -> Self::Output {
-        <&InversionList>::bitor(&self, &rhs)
+impl<Ty: PrimInt> ops::BitOr<InversionList<Ty>> for InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn bitor(self, rhs: InversionList<Ty>) -> Self::Output {
+        <&InversionList<Ty>>::bitor(&self, &rhs)
     }
 }
 
-impl ops::BitOrAssign<InversionList> for InversionList {
-    fn bitor_assign(&mut self, rhs: InversionList) {
+impl<Ty: PrimInt> ops::BitOrAssign<InversionList<Ty>> for InversionList<Ty> {
+    fn bitor_assign(&mut self, rhs: InversionList<Ty>) {
         *self |= &rhs;
     }
 }
 
-impl ops::BitOrAssign<&InversionList> for InversionList {
-    fn bitor_assign(&mut self, rhs: &InversionList) {
+impl<Ty: PrimInt> ops::BitOrAssign<&InversionList<Ty>> for InversionList<Ty> {
+    fn bitor_assign(&mut self, rhs: &InversionList<Ty>) {
         *self = &*self | rhs;
     }
 }
 
-impl ops::Not for InversionList {
-    type Output = InversionList;
-    fn not(self) -> InversionList {
+impl<Ty: PrimInt> ops::Not for InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn not(self) -> InversionList<Ty> {
         !&self
     }
 }
 
-impl ops::Not for &InversionList {
-    type Output = InversionList;
-    fn not(self) -> InversionList {
+impl<Ty: PrimInt> ops::Not for &InversionList<Ty> {
+    type Output = InversionList<Ty>;
+    fn not(self) -> InversionList<Ty> {
         let mut res = InversionList::new();
         let mut iter = self.iter();
         if let Some(range) = iter.next() {
-            let mut last = if range.start == 0 {
+            let mut last = if range.start == Ty::min_value() {
                 range.end
             } else {
-                res.add_range(0..range.start);
+                res.add_range(Ty::min_value()..range.start);
                 range.end
             };
             for range in iter {
                 res.add_range(last..range.start);
                 last = range.end
             }
-            res.add_range(last..!0);
+            res.add_range(last..Ty::max_value());
         }
         res
     }
@@ -619,7 +626,7 @@ mod test {
     #[test]
     fn add_range_ignore_max_range() {
         // test to make sure we dont overflow
-        let mut il = InversionList(vec![0..10, 20..30, 40..50, 60..70]);
+        let mut il = InversionList(vec![0usize..10, 20..30, 40..50, 60..70]);
         il.add_range(!0..!0);
         assert_eq!(il, InversionList(vec![0..10, 20..30, 40..50, 60..70]));
     }
@@ -747,8 +754,8 @@ mod test {
     fn invert() {
         let mut il = InversionList(vec![1..10, 10..26, 30..33, 33..35, 35..40, 41..45]);
         il.invert();
-        assert_eq!(il, InversionList(vec![0..1, 26..30, 40..41]));
-        let mut il = InversionList(vec![0..10, 15..26, 26..33, 34..35, 35..36]);
+        assert_eq!(il, InversionList(vec![0usize..1, 26..30, 40..41]));
+        let mut il = InversionList(vec![0usize..10, 15..26, 26..33, 34..35, 35..36]);
         il.invert();
         assert_eq!(il, InversionList(vec![10..15, 33..34]));
     }
@@ -793,9 +800,9 @@ mod test {
 
     #[test]
     fn test_not() {
-        let il = InversionList(vec![0..5, 5..15, 20..25, 50..80]);
+        let il = InversionList(vec![0usize..5, 5..15, 20..25, 50..80]);
         assert_eq!(!il, InversionList(vec![15..20, 25..50, 80..!0]));
         let il = InversionList(vec![5..15, 20..25, 50..80]);
-        assert_eq!(!il, InversionList(vec![0..5, 15..20, 25..50, 80..!0]));
+        assert_eq!(!il, InversionList(vec![0usize..5, 15..20, 25..50, 80..!0]));
     }
 }
