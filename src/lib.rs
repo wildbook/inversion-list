@@ -145,10 +145,14 @@ impl<Ty: PrimInt> InversionList<Ty> {
     /// Adds a unit range(index..index + 1) to the inversion list. This is faster than using
     /// [`add_range`] saving a second binary_search.
     ///
+    /// If the unit is not part of an existing range, `true` is returned.
+    ///
+    /// If the unit already exists in a range, `false` is returned.
+    ///
     /// # Panics
     ///
     /// Panics if index is equal to usize::MAX.
-    pub fn add_unit(&mut self, index: Ty) {
+    pub fn add_unit(&mut self, index: Ty) -> bool {
         if let Err(insert_idx) = self.binary_search(index) {
             // this creates a new unit range that may be directly adjacent to an existing one
             // have a method that tries to merge them directly as well?
@@ -158,7 +162,11 @@ impl<Ty: PrimInt> InversionList<Ty> {
                     ..index
                         .checked_add(&Ty::one())
                         .expect("index is equal to usize::MAX"),
-            )
+            );
+
+            true
+        } else {
+            false
         }
     }
 
