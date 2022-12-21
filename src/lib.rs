@@ -1,38 +1,41 @@
 #![warn(clippy::all)]
 
-use std::convert::identity;
-use std::iter::FromIterator;
-use std::mem;
-use std::ops::{self, Bound, Range, RangeBounds};
+use core::convert::identity;
+use core::iter::FromIterator;
+use core::mem;
+use core::ops::{self, Range, RangeBounds};
 
 mod iter;
-use num_traits::PrimInt;
+mod util;
+
+use crate::util::bounds_to_range;
 
 pub use self::iter::*;
 
-/// Turn a RangeBounds into a Range, unless the resulting range is empty.
-fn bounds_to_range<T: PrimInt, R: RangeBounds<T>>(range: R) -> Option<Range<T>> {
-    let start = match range.start_bound() {
-        Bound::Included(&n) => n,
-        Bound::Excluded(&n) => n
-            .checked_add(&T::one())
-            .expect("range start bound overflowed"),
-        Bound::Unbounded => T::min_value(),
-    };
-    let end = match range.end_bound() {
-        Bound::Included(&n) => n
-            .checked_add(&T::one())
-            .expect("range end bound overflowed"),
-        Bound::Excluded(&n) => n,
-        Bound::Unbounded => T::max_value(),
-    };
-
-    if end <= start {
-        None
-    } else {
-        Some(start..end)
-    }
+pub trait OrderedIndex:
+    Sized + Copy + PartialOrd + Ord + Eq + ops::Sub<Self, Output = Self> + ops::Add<Self, Output = Self>
+{
+    fn one() -> Self;
+    fn min_value() -> Self;
+    fn max_value() -> Self;
+    fn checked_add(self, v: Self) -> Option<Self>;
 }
+
+macro_rules! impl_prim {
+    ($($ty:ty)*) => {
+        $(
+            impl OrderedIndex for $ty {
+                fn one() -> Self { 1 }
+                fn min_value() -> Self { Self::MIN }
+                fn max_value() -> Self { Self::MAX }
+                fn checked_add(self, v: Self) -> Option<Self> {
+                    Self::checked_add(self, v)
+                }
+            }
+        )*
+    };
+}
+impl_prim! { u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize }
 
 /// An inversion list is a data structure that describes a set of non-overlapping numeric ranges, stored in increasing order.
 ///
@@ -41,9 +44,9 @@ fn bounds_to_range<T: PrimInt, R: RangeBounds<T>>(range: R) -> Option<Range<T>> 
 /// - *_at: These functions usually take indices into the backing buffer, while the other versions
 ///         generally take a value that is contained in a range or ranges directly.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct InversionList<Ty: PrimInt = usize>(Vec<Range<Ty>>);
+pub struct InversionList<Ty: OrderedIndex = usize>(Vec<Range<Ty>>);
 
-impl<Ty: PrimInt> InversionList<Ty> {
+impl<Ty: OrderedIndex> InversionList<Ty> {
     pub fn new() -> Self {
         InversionList(vec![])
     }
@@ -160,7 +163,7 @@ impl<Ty: PrimInt> InversionList<Ty> {
                 insert_idx,
                 index
                     ..index
-                        .checked_add(&Ty::one())
+                        .checked_add(Ty::one())
                         .expect("index is equal to usize::MAX"),
             );
 
@@ -355,14 +358,14 @@ impl<R: RangeBounds<usize>> From<R> for InversionList<usize> {
     }
 }
 
-impl<Ty: PrimInt> ops::Deref for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::Deref for InversionList<Ty> {
     type Target = [Range<Ty>];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<Ty: PrimInt> FromIterator<Range<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> FromIterator<Range<Ty>> for InversionList<Ty> {
     fn from_iter<T: IntoIterator<Item = Range<Ty>>>(iter: T) -> Self {
         let mut res = InversionList::new();
         for range in iter {
@@ -372,7 +375,7 @@ impl<Ty: PrimInt> FromIterator<Range<Ty>> for InversionList<Ty> {
     }
 }
 
-impl<Ty: PrimInt> ops::BitAnd<&InversionList<Ty>> for &InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAnd<&InversionList<Ty>> for &InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitand(self, rhs: &InversionList<Ty>) -> Self::Output {
         let mut res = InversionList::new();
@@ -401,40 +404,40 @@ impl<Ty: PrimInt> ops::BitAnd<&InversionList<Ty>> for &InversionList<Ty> {
     }
 }
 
-impl<Ty: PrimInt> ops::BitAnd<InversionList<Ty>> for &InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAnd<InversionList<Ty>> for &InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitand(self, rhs: InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitand(self, &rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitAnd<&InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAnd<&InversionList<Ty>> for InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitand(self, rhs: &InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitand(&self, rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitAnd<InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAnd<InversionList<Ty>> for InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitand(self, rhs: InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitand(&self, &rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitAndAssign<InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAndAssign<InversionList<Ty>> for InversionList<Ty> {
     fn bitand_assign(&mut self, rhs: InversionList<Ty>) {
         *self &= &rhs;
     }
 }
 
-impl<Ty: PrimInt> ops::BitAndAssign<&InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitAndAssign<&InversionList<Ty>> for InversionList<Ty> {
     fn bitand_assign(&mut self, rhs: &InversionList<Ty>) {
         *self = &*self & rhs;
     }
 }
 
-impl<Ty: PrimInt> ops::BitOr<&InversionList<Ty>> for &InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOr<&InversionList<Ty>> for &InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitor(self, rhs: &InversionList<Ty>) -> Self::Output {
         // TODO: optimize these clones away in owned impls
@@ -452,47 +455,47 @@ impl<Ty: PrimInt> ops::BitOr<&InversionList<Ty>> for &InversionList<Ty> {
     }
 }
 
-impl<Ty: PrimInt> ops::BitOr<InversionList<Ty>> for &InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOr<InversionList<Ty>> for &InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitor(self, rhs: InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitor(self, &rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitOr<&InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOr<&InversionList<Ty>> for InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitor(self, rhs: &InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitor(&self, rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitOr<InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOr<InversionList<Ty>> for InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn bitor(self, rhs: InversionList<Ty>) -> Self::Output {
         <&InversionList<Ty>>::bitor(&self, &rhs)
     }
 }
 
-impl<Ty: PrimInt> ops::BitOrAssign<InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOrAssign<InversionList<Ty>> for InversionList<Ty> {
     fn bitor_assign(&mut self, rhs: InversionList<Ty>) {
         *self |= &rhs;
     }
 }
 
-impl<Ty: PrimInt> ops::BitOrAssign<&InversionList<Ty>> for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::BitOrAssign<&InversionList<Ty>> for InversionList<Ty> {
     fn bitor_assign(&mut self, rhs: &InversionList<Ty>) {
         *self = &*self | rhs;
     }
 }
 
-impl<Ty: PrimInt> ops::Not for InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::Not for InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn not(self) -> InversionList<Ty> {
         !&self
     }
 }
 
-impl<Ty: PrimInt> ops::Not for &InversionList<Ty> {
+impl<Ty: OrderedIndex> ops::Not for &InversionList<Ty> {
     type Output = InversionList<Ty>;
     fn not(self) -> InversionList<Ty> {
         let mut res = InversionList::new();

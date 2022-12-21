@@ -3,11 +3,11 @@ use std::{
     ops::Range,
 };
 
-use num_traits::PrimInt;
+use crate::OrderedIndex;
 
 use crate::InversionList;
 
-impl<Ty: PrimInt> InversionList<Ty> {
+impl<Ty: OrderedIndex> InversionList<Ty> {
     /// An iterator over the inner ranges contained in this list.
     pub fn iter(&self) -> Iter<Ty> {
         Iter {
@@ -51,11 +51,11 @@ impl<Ty: PrimInt> InversionList<Ty> {
     }
 }
 
-pub struct Iter<'il, Ty: PrimInt = usize> {
+pub struct Iter<'il, Ty: OrderedIndex = usize> {
     iter: std::slice::Iter<'il, Range<Ty>>,
 }
 
-impl<Ty: PrimInt> Iterator for Iter<'_, Ty> {
+impl<Ty: OrderedIndex> Iterator for Iter<'_, Ty> {
     type Item = Range<Ty>;
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().cloned()
@@ -66,15 +66,15 @@ impl<Ty: PrimInt> Iterator for Iter<'_, Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for Iter<'_, Ty> {}
-impl<Ty: PrimInt> ExactSizeIterator for Iter<'_, Ty> {
+impl<Ty: OrderedIndex> FusedIterator for Iter<'_, Ty> {}
+impl<Ty: OrderedIndex> ExactSizeIterator for Iter<'_, Ty> {
     #[inline]
     fn len(&self) -> usize {
         self.iter.len()
     }
 }
 
-impl<'il, Ty: PrimInt> IntoIterator for &'il InversionList<Ty> {
+impl<'il, Ty: OrderedIndex> IntoIterator for &'il InversionList<Ty> {
     type Item = Range<Ty>;
     type IntoIter = Iter<'il, Ty>;
     fn into_iter(self) -> Self::IntoIter {
@@ -84,11 +84,11 @@ impl<'il, Ty: PrimInt> IntoIterator for &'il InversionList<Ty> {
     }
 }
 
-pub struct IntoIter<Ty: PrimInt = usize> {
+pub struct IntoIter<Ty: OrderedIndex = usize> {
     iter: std::vec::IntoIter<Range<Ty>>,
 }
 
-impl<Ty: PrimInt> Iterator for IntoIter<Ty> {
+impl<Ty: OrderedIndex> Iterator for IntoIter<Ty> {
     type Item = Range<Ty>;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -100,15 +100,15 @@ impl<Ty: PrimInt> Iterator for IntoIter<Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for IntoIter<Ty> {}
-impl<Ty: PrimInt> ExactSizeIterator for IntoIter<Ty> {
+impl<Ty: OrderedIndex> FusedIterator for IntoIter<Ty> {}
+impl<Ty: OrderedIndex> ExactSizeIterator for IntoIter<Ty> {
     #[inline]
     fn len(&self) -> usize {
         self.iter.len()
     }
 }
 
-impl<Ty: PrimInt> IntoIterator for InversionList<Ty> {
+impl<Ty: OrderedIndex> IntoIterator for InversionList<Ty> {
     type Item = Range<Ty>;
     type IntoIter = IntoIter<Ty>;
     #[inline]
@@ -119,12 +119,12 @@ impl<Ty: PrimInt> IntoIterator for InversionList<Ty> {
     }
 }
 
-pub struct Difference<'il, Ty: PrimInt = usize> {
+pub struct Difference<'il, Ty: OrderedIndex = usize> {
     pub(crate) iter: Iter<'il, Ty>,
     pub(crate) other: &'il InversionList<Ty>,
 }
 
-impl<Ty: PrimInt> Iterator for Difference<'_, Ty> {
+impl<Ty: OrderedIndex> Iterator for Difference<'_, Ty> {
     type Item = Range<Ty>;
 
     #[inline]
@@ -144,13 +144,13 @@ impl<Ty: PrimInt> Iterator for Difference<'_, Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for Difference<'_, Ty> {}
+impl<Ty: OrderedIndex> FusedIterator for Difference<'_, Ty> {}
 
-pub struct SymmetricDifference<'il, Ty: PrimInt = usize> {
+pub struct SymmetricDifference<'il, Ty: OrderedIndex = usize> {
     pub(crate) iter: Chain<Difference<'il, Ty>, Difference<'il, Ty>>,
 }
 
-impl<Ty: PrimInt> Iterator for SymmetricDifference<'_, Ty> {
+impl<Ty: OrderedIndex> Iterator for SymmetricDifference<'_, Ty> {
     type Item = Range<Ty>;
 
     #[inline]
@@ -164,13 +164,13 @@ impl<Ty: PrimInt> Iterator for SymmetricDifference<'_, Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for SymmetricDifference<'_, Ty> {}
+impl<Ty: OrderedIndex> FusedIterator for SymmetricDifference<'_, Ty> {}
 
-pub struct Union<'il, Ty: PrimInt = usize> {
+pub struct Union<'il, Ty: OrderedIndex = usize> {
     pub(crate) iter: Chain<Iter<'il, Ty>, Difference<'il, Ty>>,
 }
 
-impl<Ty: PrimInt> Iterator for Union<'_, Ty> {
+impl<Ty: OrderedIndex> Iterator for Union<'_, Ty> {
     type Item = Range<Ty>;
 
     #[inline]
@@ -184,14 +184,14 @@ impl<Ty: PrimInt> Iterator for Union<'_, Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for Union<'_, Ty> {}
+impl<Ty: OrderedIndex> FusedIterator for Union<'_, Ty> {}
 
-pub struct Intersection<'il, Ty: PrimInt = usize> {
+pub struct Intersection<'il, Ty: OrderedIndex = usize> {
     pub(crate) iter: Iter<'il, Ty>,
     pub(crate) other: &'il InversionList<Ty>,
 }
 
-impl<Ty: PrimInt> Iterator for Intersection<'_, Ty> {
+impl<Ty: OrderedIndex> Iterator for Intersection<'_, Ty> {
     type Item = Range<Ty>;
 
     #[inline]
@@ -211,4 +211,4 @@ impl<Ty: PrimInt> Iterator for Intersection<'_, Ty> {
     }
 }
 
-impl<Ty: PrimInt> FusedIterator for Intersection<'_, Ty> {}
+impl<Ty: OrderedIndex> FusedIterator for Intersection<'_, Ty> {}
