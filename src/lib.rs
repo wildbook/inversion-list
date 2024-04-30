@@ -95,7 +95,7 @@ impl<Ty: OrderedIndex> InversionList<Ty> {
                     match self.binary_search(end - Ty::one()) {
                         Ok(_) => true,
                         // check if there is at least one range inside of our range
-                        Err(idx_e) => idx_e - idx_s > 1,
+                        Err(idx_e) => idx_e - idx_s >= 1,
                     }
                 }
             }
@@ -752,6 +752,9 @@ mod test {
         assert!(!il.intersects(0..1));
         assert!(il.intersects(12..17));
         assert!(il.intersects(20..30));
+
+        assert!(il.intersects(2..8));
+        assert!(il.intersects(0..11));
     }
 
     #[test]
